@@ -64,7 +64,7 @@ class Database implements DatabaseInterface
         if ($key === '{') {
             $positionCloseBlock = strpos($query, '}', $position);
             $positionNextOpenCloseBlock = $this->multiStrPos($query, ['{', '}'],$position + 1);
-            if ($positionNextOpenCloseBlock !== $positionCloseBlock ) {  //Отвлекают на работе демоны (, сразу не учел
+            if ($positionNextOpenCloseBlock !== $positionCloseBlock ) {
                 throw new Exception("double opening of the block");
             }
             $positionSkipParameter = strpos($query, $needle, $position);

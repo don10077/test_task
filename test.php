@@ -21,4 +21,4 @@ $db = new Database($mysqli);
 $test = new DatabaseTest($db);
 $test->testBuildQuery();
 
-exit('OK. Спасибо, хоть у кого то, интересное тестовое задание :)');
+exit('OK');

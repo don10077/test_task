@@ -19,7 +19,7 @@ class Database implements DatabaseInterface
      */
     public function buildQuery(string $query, array $args = []): string
     {
-        $position = $this->multiStrPos($query, ['?', '{']);
+        $position = $this->multiStrPos($query, ['?', '{', '}']);
         if ($position && !empty($args)) {
             $this->prepareTemplate($query, $position, $args[0]);
             array_shift($args);

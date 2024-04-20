@@ -63,6 +63,9 @@ class Database implements DatabaseInterface
         $key = substr($query, $position, 1);
         if ($key === '{') {
             $positionCloseBlock = strpos($query, '}', $position);
+            if ($positionCloseBlock === false ) {
+                throw new Exception("The closing bracket  } is missing");
+            }
             $positionNextOpenCloseBlock = $this->multiStrPos($query, ['{', '}'],$position + 1);
             if ($positionNextOpenCloseBlock !== $positionCloseBlock ) {
                 throw new Exception("double opening of the block");
@@ -70,7 +73,6 @@ class Database implements DatabaseInterface
             $positionSkipParameter = strpos($query, $needle, $position);
             if(
                 $positionSkipParameter !== false &&
-                $positionCloseBlock !== false &&
                 $positionSkipParameter < $positionCloseBlock
             ) {
                 $query = preg_replace('~{.+?}~', '', $query, 1);

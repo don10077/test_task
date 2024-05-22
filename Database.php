@@ -20,16 +20,17 @@ class Database implements DatabaseInterface
     public function buildQuery(string $query, array $args = []): string
     {
         $position = $this->multiStrPos($query, ['?', '{', '}']);
-        if ($position && !empty($args)) {
-            $this->prepareTemplate($query, $position, $args[0]);
-            array_shift($args);
-        } else if ($position && empty($args)) {
+        if ($position && empty($args)) {
             throw new Exception('Missing arguments');
-        } else {
-            return $query;
         }
 
-        return $this->buildQuery($query, $args);
+        if ($position) {
+            $query = $this->prepareTemplate($query, $position, $args[0]);
+            array_shift($args);
+            return $this->buildQuery($query, $args);
+        }
+
+        return $query;
     }
 
     public function skip(): string
@@ -45,8 +46,8 @@ class Database implements DatabaseInterface
             if (
                 $positionNew !== false &&
                 (
-                   !$position ||
-                   $position > $positionNew
+                    !$position ||
+                    $position > $positionNew
                 )
             ) {
                 $position = $positionNew;
@@ -58,41 +59,23 @@ class Database implements DatabaseInterface
     /**
      * @throws Exception
      */
-    protected function prepareTemplate(string &$query, int $position, string|int|float|bool|array $needle): void
+    protected function prepareTemplate(string $query, int $position, string|int|float|bool|array|null $needle): string
     {
         $key = substr($query, $position, 1);
         if ($key === '{') {
-            $positionCloseBlock = strpos($query, '}', $position);
-            if ($positionCloseBlock === false ) {
-                throw new Exception("The closing bracket  } is missing");
-            }
-            $positionNextOpenCloseBlock = $this->multiStrPos($query, ['{', '}'],$position + 1);
-            if ($positionNextOpenCloseBlock !== $positionCloseBlock ) {
-                throw new Exception("double opening of the block");
-            }
-            $positionSkipParameter = strpos($query, $needle, $position);
-            if(
-                $positionSkipParameter !== false &&
-                $positionSkipParameter < $positionCloseBlock
-            ) {
-                $query = preg_replace('~{.+?}~', '', $query, 1);
-               } else {
-                $query = preg_replace('/{|}/', '', $query, 2);
-                $query = $this->buildQuery($query, [$needle]);
-            }
-        } else {
-            $this->fillingTemplate($query, $position, $needle);
+            return $this->fillingBracketTemplate($query, $position, $needle);
         }
+        return $this->fillingTemplate($query, $position, $needle);
     }
 
     /**
      * @throws Exception
      */
-    protected function fillingTemplate(&$query, int $position, string|int|float|bool|array $needle): void
+    protected function fillingTemplate($query, int $position, string|int|float|bool|array|null $needle): string
     {
         $key = trim(substr($query, $position, 2));
-        match ($key) {
-            '?'  => $this->replaceStandard($query, $needle),
+        return match ($key) {
+            '?' => $this->replaceStandard($query, $needle),
             '?d' => $this->replaceInt($query, $needle),
             '?f' => $this->replaceFloat($query, $needle),
             '?a' => $this->replaceArray($query, $needle),
@@ -100,59 +83,85 @@ class Database implements DatabaseInterface
             default => throw new Exception("Unknown template parameter $key"),
         };
     }
-    protected function replaceStandard(string &$query, string|int|float|bool $key): void
+
+    /**
+     * @throws Exception
+     */
+    protected function fillingBracketTemplate($query, int $position, string|int|float|bool|array $needle): string
     {
-        $value = match (gettype($key)){
+        $positionCloseBlock = strpos($query, '}', $position);
+        if ($positionCloseBlock === false) {
+            throw new Exception("The closing bracket } is missing  in query: $query");
+        }
+
+        $positionNextOpenCloseBlock = $this->multiStrPos($query, ['{', '}'], $position + 1);
+        if ($positionNextOpenCloseBlock !== $positionCloseBlock) {
+            throw new Exception("double opening of the block in query: $query");
+        }
+
+        $positionSkipParameter = strpos($query, $needle, $position);
+        if (
+            $positionSkipParameter !== false &&
+            $positionSkipParameter < $positionCloseBlock
+        ) {
+            return preg_replace('~{.+?}~', '', $query, 1);
+        }
+
+        $query = preg_replace('/[{}]/', '', $query, 2);
+        return $this->buildQuery($query, [$needle]);
+    }
+
+    protected function replaceStandard(string $query, string|int|float|bool $key): string
+    {
+        $value = match (gettype($key)) {
             'boolean' => $key ? 1 : 0,
             'string' => "'$key'",
             'integer', 'double' => $key,
             'NULL' => 'NULL',
         };
-        $query = preg_replace('/\?/', $value, $query, 1);
+        return preg_replace('/\?/', $value, $query, 1);
     }
 
-    protected function replaceArray(string &$query, string|array|null $key): void
+    /**
+     * @throws Exception
+     */
+    protected function replaceInt(string $query, string|int|float|bool|null $key): string
     {
-        if (is_array($key)){
-            $value = $this->parseArray($key);
-        } else {
-            $value = "'$key'";
-        }
-        $query = preg_replace('/\?a/', $value, $query, 1);
+        return preg_replace('/\?d/', is_null($key) ? 'NULL' : intval($key), $query, 1);
     }
 
-    protected function replaceInt(string &$query, string|int|float|bool|array|null $key): void
+    /**
+     * @throws Exception
+     */
+    protected function replaceFloat(string $query, string|int|float|bool|null $key): string
     {
-        $query = preg_replace('/\?d/',intval($key), $query, 1);
+        return preg_replace('/\?f/', is_null($key) ? 'NULL': floatval($key), $query, 1);
     }
 
-    protected function replaceFloat(string &$query, string|int|float|bool|array|null $key): void
+    protected function replaceIdentification(string $query, string|array $key): string
     {
-        $query = preg_replace('/\?f/',floatval($key), $query, 1);
+        $value = is_array($key) ? $this->parseArray($key, "`") : "`$key`";
+        return preg_replace('/\?#/', $value, $query, 1);
     }
 
-    protected function replaceIdentification(string &$query, string|array|null $key): void
+    protected function replaceArray(string $query, string|array $key): string
     {
-        if (is_array($key)){
-            $value = $this->parseArray($key, "`");
-        } else {
-            $value = "`$key`";
-        }
-        $query = preg_replace('/\?#/', $value, $query, 1);
+        $value = is_array($key) ? $this->parseArray($key) : "'$key'";
+        return preg_replace('/\?a/', $value, $query, 1);
     }
 
-    protected function parseArray(array &$array, string $separator = "'"): string
+    protected function parseArray(array $array, string $separator = "'"): string
     {
         foreach ($array as $key => $value) {
-            $str = $value ? $separator.$value.$separator : 'NULL';
+            $str = $value ? $separator . $value . $separator : 'NULL';
             if (is_numeric($key)) {
                 if (!is_numeric($value)) {
                     $array[$key] = $str;
                 }
-            } else {
-                $array[$key] = "`$key` = $str";
+                continue;
             }
-        }
+            $array[$key] = "`$key` = $str";
+       }
         return implode(', ', $array);
     }
 }
